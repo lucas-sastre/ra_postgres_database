@@ -1,0 +1,99 @@
+version: '3.9'
+
+services:
+    ra_postgresql_database:
+        container_name: "postgis"
+        image: lotermin/postgis
+        ports: 
+            - "5432:5432"
+        environment:
+            - POSTGRES_USER=$POSTGRES_USER
+            - POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+            - POSTGRES_DB=qgis
+        restart: always
+        volumes: 
+            - ra-postgres-data:/var/lib/postgresql/data/
+
+    pgadmin:
+        container_name: "pgadmin"
+        image: dpage/pgadmin4
+        environment: 
+            - PGADMIN_DEFAULT_EMAIL=$PGADMIN_DEFAULT_EMAIL
+            - PGADMIN_DEFAULT_PASSWORD=$PGADMIN_DEFAULT_PASSWORD
+        restart: always
+        networks:
+            - proxy
+        volumes: 
+            - ra-pgadmin-data:/root/.pgadmin
+        labels:
+            - "traefik.enable=true"
+            - "traefik.http.routers.pgadmin.entrypoints=http"
+            - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.selfhost.ar`)"
+            - "traefik.http.middlewares.pgadmin-https-redirect.redirectscheme.scheme=https"
+            - "traefik.http.routers.pgadmin.middlewares=pgadmin-https-redirect"
+            - "traefik.http.routers.pgadmin-secure.entrypoints=https"
+            - "traefik.http.routers.pgadmin-secure.rule=Host(`pgadmin.selfhost.ar`)"
+            - "traefik.http.routers.pgadmin-secure.tls.certresolver=cloudflare"
+            - "traefik.http.routers.pgadmin-secure.tls=true"
+            - "traefik.http.routers.pgadmin-secure.service=pgadmin"
+            - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+            - "traefik.docker.network=proxy"
+
+    geoserver:
+        container_name: "geoserver"
+        image: oscarfonts/geoserver
+        
+        ports: 
+            - "5050:8080"
+
+        networks:
+            - proxy
+        volumes:
+            - ra-geoserver-data:/opt/geoserver/data_dir
+            
+    postgres-exporter:
+        container_name: "postgres-exporter"
+        image: wrouesnel/postgres_exporter:v0.8.0
+        restart: always
+        environment:
+          - DATA_SOURCE_URI=10.0.0.11:5432/postgres?sslmode=disable
+          - DATA_SOURCE_USER=$POSTGRES_USER
+          - DATA_SOURCE_PASS=$POSTGRES_PASSWORD
+        ports:
+          - "9187:9187"
+        depends_on:
+          - ra_postgresql_database
+    
+    pgbackups3:
+      restart: always
+      container_name: "postgres_backup"
+      image: schickling/postgres-backup-s3
+      links:
+        - ra_postgresql_database
+
+      environment:
+        SCHEDULE: '@daily'
+        S3_ENDPOINT: https://s3-api.selfhost.ar
+        S3_ACCESS_KEY_ID: $S3_ACCESS_KEY
+        S3_SECRET_ACCESS_KEY: $S3_SECRET_KEY
+        S3_BUCKET: $S3_NAME
+        POSTGRES_DATABASE: qgis
+        POSTGRES_USER: $POSTGRES_USER
+        POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+        POSTGRES_EXTRA_OPTS: '--schema=public --blobs'
+        POSTGRES_HOST: ra_postgresql_database
+        POSTGRES_BACKUP_ALL: true
+      depends_on:
+        - ra_postgresql_database
+
+
+
+volumes:
+    ra-postgres-data:
+    ra-pgadmin-data:
+    ra-geoserver-data:
+
+networks:
+  proxy:
+    external: true
+ 
